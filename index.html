@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>간트 차트 생성기</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif;background:#f5f5f5;padding:16px;font-size:13px}
+h1{font-size:18px;font-weight:700;color:#111;margin-bottom:14px}
+
+/* 패널 */
+.panel{background:#fff;border:1px solid #ddd;border-radius:8px;padding:14px;margin-bottom:10px}
+.panel-title{font-size:12px;font-weight:700;color:#333;margin-bottom:10px}
+
+/* 폼 */
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.fg{display:flex;flex-direction:column;gap:3px}
+.fg label{font-size:11px;color:#666}
+input[type=date],input[type=number]{height:30px;font-size:12px;padding:0 8px;border:1px solid #ccc;border-radius:5px;background:#fff;color:#111}
+input[type=number]{width:58px}
+input[type=range]{width:80px;cursor:pointer;vertical-align:middle}
+.sv{font-size:12px;font-weight:600;color:#111;min-width:32px;display:inline-block}
+
+/* 버튼 */
+.btn{height:30px;padding:0 14px;font-size:12px;border-radius:5px;border:1px solid #bbb;background:#f0f0f0;color:#111;cursor:pointer;font-weight:600;white-space:nowrap}
+.btn:hover{filter:brightness(.94)}
+.btn-go{background:#E8920A;border-color:#C47800;color:#fff}
+.btn-ppt{background:#C84B31;border-color:#a03520;color:#fff}
+.btn-undo{background:#e55;border-color:#c33;color:#fff}
+
+/* 모드 버튼 */
+.mbar{display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.mbtn{height:28px;padding:0 12px;font-size:11px;border-radius:5px;border:1px solid #bbb;background:#f0f0f0;color:#111;cursor:pointer;font-weight:600}
+.mbtn.on{background:#E8920A;color:#fff;border-color:#C47800}
+
+.hint{font-size:11px;color:#666;margin-bottom:8px;line-height:1.8}
+
+/* 차트 */
+.chart-wrap{overflow-x:auto;background:#fff;border:1px solid #ccc;border-radius:6px;padding:10px}
+#chart-container{position:relative;display:inline-block}
+
+/* 표 */
+table#gt{border-collapse:collapse;background:#fff;user-select:none;-webkit-user-select:none;position:relative}
+table#gt th,table#gt td{padding:0;text-align:center;vertical-align:middle}
+td.cell.sel{background:#FFE082!important}
+
+/* 하단 */
+.add-row-btn{font-size:11px;color:#1a6fc4;cursor:pointer;padding:4px 10px;border:1px dashed #1a6fc4;border-radius:4px;display:inline-block;margin-top:8px}
+.add-row-btn:hover{background:#e8f0fb}
+
+/* 기준선 표시 */
+.ref-info{font-size:11px;color:#cc0000;font-weight:700;margin-left:8px}
+
+/* 모달 */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:500}
+.modal{background:#fff;border-radius:10px;padding:22px;width:320px;border:1px solid #ccc;box-shadow:0 4px 20px rgba(0,0,0,.15)}
+.modal h3{font-size:14px;font-weight:700;margin-bottom:12px;color:#111}
+.modal textarea{width:100%;height:62px;font-size:12px;padding:7px 9px;border:1px solid #ccc;border-radius:5px;resize:vertical;font-family:inherit;margin-bottom:6px}
+.modal-hint{font-size:10px;color:#888;margin-bottom:10px}
+.modal-btns{display:flex;gap:8px;justify-content:flex-end}
+</style>
+</head>
+<body>
+
+<h1>📊 간트 차트 생성기</h1>
+
+<!-- 기간 설정 -->
+<div class="panel">
+  <div class="panel-title">기간 설정</div>
+  <div class="row">
+    <div class="fg"><label>시작일</label><input type="date" id="cs" value="2025-03-26"></div>
+    <div class="fg"><label>종료일</label><input type="date" id="ce" value="2025-04-30"></div>
+    <button class="btn btn-go" onclick="buildChart()">차트 생성</button>
+    <button class="btn btn-undo" onclick="undoLast()">↩ 마지막 화살표 삭제</button>
+    <button class="btn btn-ppt" onclick="exportPPT()">📊 PPT 다운로드</button>
+  </div>
+</div>
+
+<!-- 크기 조절 -->
+<div class="panel">
+  <div class="panel-title">실시간 크기 조절 (차트 데이터 유지)</div>
+  <div class="row">
+    <div class="fg"><label>셀 너비</label>
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="range" id="cw" min="14" max="60" value="26" oninput="onCW(this.value)">
+        <span class="sv" id="cwv">26px</span>
+      </div>
+    </div>
+    <div class="fg"><label>행 높이</label>
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="range" id="rh" min="22" max="80" value="36" oninput="onRH(this.value)">
+        <span class="sv" id="rhv">36px</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 모드 & 힌트 -->
+<div class="mbar">
+  <span style="font-size:11px;color:#666;font-weight:600">모드:</span>
+  <button class="mbtn on" id="m-arrow" onclick="setMode('arrow')">🏹 화살표 그리기</button>
+  <button class="mbtn" id="m-move" onclick="setMode('move')">✋ 화살표 이동</button>
+  <button class="mbtn" id="m-ref" onclick="setMode('ref')">📍 기준선 지정</button>
+  <span class="ref-info" id="ref-lbl"></span>
+  <button class="btn" style="height:28px;font-size:11px;margin-left:8px" onclick="clearRef()">기준선 제거</button>
+</div>
+<div class="hint">
+  🏹 <b>그리기</b>: 셀을 클릭→드래그하여 화살표 생성, 놓으면 텍스트 입력창 표시&nbsp;|&nbsp;
+  ✋ <b>이동</b>: 화살표를 드래그하여 위치/행 변경&nbsp;|&nbsp;
+  📍 <b>기준선</b>: 원하는 날짜 셀 클릭 → 빨간 세로선 표시&nbsp;|&nbsp;
+  화살표 <b>더블클릭</b>: 텍스트 수정&nbsp;|&nbsp;
+  화살표 <b>우클릭</b>: 삭제
+</div>
+
+<!-- 차트 영역 -->
+<div class="chart-wrap">
+  <div id="chart-container"></div>
+</div>
+<div><span class="add-row-btn" id="addbtn" style="display:none" onclick="addRow()">+ 행 추가</span></div>
+
+<!-- 모달 -->
+<div id="modal" style="display:none">
+  <div class="modal-bg">
+    <div class="modal">
+      <h3 id="mt">텍스트 입력</h3>
+      <textarea id="mi" placeholder="화살표 안에 들어갈 내용을 입력하세요"></textarea>
+      <div class="modal-hint">Enter = 줄바꿈 &nbsp;|&nbsp; Ctrl+Enter = 확인 &nbsp;|&nbsp; ESC = 취소</div>
+      <div class="modal-btns">
+        <button class="btn" onclick="closeModal(0)">취소</button>
+        <button class="btn btn-go" onclick="closeModal(1)">확인</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 색상 ──
+const C = {
+  hdrMonth: '#bfbfbf',
+  hdrDay:   '#d9d9d9',
+  weHdr:    '#bfbfbf',
+  label:    '#d9d9d9',
+  cell:     '#ffffff',
+  weCell:   '#d9d9d9',
+  bd:       '#999999',
+  red:      '#cc0000',
+  arwF:     '#FFD600',
+  txt:      '#000000',
+};
+
+// ── 상태 ──
+let allDays = [], rows = [], arrows = [];
+let refDayIdx = -1, mode = 'arrow';
+let CW = 26, RH = 36, built = false;
+let dDrag = null, dRow = null, hCells = [];
+let mDrag = null, pModal = null;
+
+// ── 크기 실시간 ──
+function onCW(v) {
+  CW = +v; document.getElementById('cwv').textContent = v + 'px';
+  if (built) applySize();
+}
+function onRH(v) {
+  RH = +v; document.getElementById('rhv').textContent = v + 'px';
+  if (built) applySize();
+}
+function applySize() {
+  const tbl = document.getElementById('gt'); if (!tbl) return;
+  tbl.querySelectorAll('[data-ci]').forEach(el => {
+    el.style.width = CW + 'px'; el.style.minWidth = CW + 'px';
+  });
+  tbl.querySelectorAll('tr[data-ri]').forEach(tr => {
+    tr.style.height = RH + 'px';
+    tr.querySelectorAll('td').forEach(td => td.style.height = RH + 'px');
+  });
+  drawAll();
+}
+
+// ── 유틸 ──
+function pd(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+function ad(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+function isWE(d) { return d.getDay() === 0 || d.getDay() === 6; }
+function setMode(m) {
+  mode = m;
+  ['arrow','move','ref'].forEach(k => document.getElementById('m-' + k).classList.toggle('on', k === m));
+  const tbl = document.getElementById('gt');
+  if (tbl) tbl.style.cursor = m === 'move' ? 'default' : 'crosshair';
+}
+function clearRef() {
+  refDayIdx = -1;
+  document.getElementById('ref-lbl').textContent = '';
+  renderTable();
+}
+
+// ── 월 헤더 스팬 ──
+function monthSpans() {
+  const spans = []; let cur = null;
+  allDays.forEach((day, di) => {
+    const mk = day.getFullYear() + '-' + day.getMonth();
+    const lbl = (day.getMonth() + 1) + '월';
+    if (!cur || cur.key !== mk) { if (cur) spans.push(cur); cur = { key: mk, lbl, cnt: 1, startDi: di }; }
+    else cur.cnt++;
+  });
+  if (cur) spans.push(cur);
+  return spans;
+}
+
+// ── 차트 빌드 ──
+function buildChart() {
+  CW = +document.getElementById('cw').value;
+  RH = +document.getElementById('rh').value;
+  const s = document.getElementById('cs').value, e = document.getElementById('ce').value;
+  if (!s || !e) return;
+  allDays = []; let d = pd(s); const end = pd(e);
+  while (d <= end) { allDays.push(new Date(d)); d = ad(d, 1); }
+  if (!rows.length) rows = [
+    { label: 'ER2' }, { label: '자검1차' }, { label: '자검2차' }, { label: 'DV1' }, { label: 'DV2' }
+  ];
+  arrows = []; refDayIdx = -1;
+  document.getElementById('ref-lbl').textContent = '';
+  renderTable(); built = true;
+}
+
+// ── 테이블 렌더 ──
+function renderTable() {
+  const ms = monthSpans();
+  const LW = 80, MH = 28, DH = 22;
+  const BD = `1px solid ${C.bd}`;
+  const th = (extra) => `border:${BD};padding:0;text-align:center;vertical-align:middle;color:${C.txt};${extra||''}`;
+  const td = (extra) => `border:${BD};padding:0;text-align:center;vertical-align:middle;${extra||''}`;
+
+  let h = `<table id="gt" style="border-collapse:collapse;table-layout:fixed;position:relative;background:#fff;user-select:none;-webkit-user-select:none;border:${BD}">`;
+  h += `<thead>`;
+
+  // 월 헤더
+  h += `<tr style="height:${MH}px">`;
+  h += `<th rowspan="2" style="${th(`width:${LW}px;min-width:${LW}px;height:${MH}px;background:${C.hdrMonth};font-size:11px;font-weight:700;cursor:pointer`)}" onclick="editRowLabel(-1)">구분</th>`;
+  ms.forEach(m => {
+    h += `<th colspan="${m.cnt}" style="${th(`height:${MH}px;background:${C.hdrMonth};font-size:12px;font-weight:700`)}">${m.lbl}</th>`;
+  });
+  h += `</tr>`;
+
+  // 일 헤더
+  h += `<tr style="height:${DH}px">`;
+  allDays.forEach((day, di) => {
+    const bg = isWE(day) ? C.weHdr : C.hdrDay;
+    const rl = di === refDayIdx ? `border-left:2px solid ${C.red};` : '';
+    h += `<th data-ci="${di}" style="${th(`${rl}width:${CW}px;min-width:${CW}px;height:${DH}px;background:${bg};font-size:10px;font-weight:700`)}">${String(day.getDate()).padStart(2,'0')}</th>`;
+  });
+  h += `</tr></thead><tbody>`;
+
+  // 데이터 행
+  rows.forEach((row, ri) => {
+    h += `<tr data-ri="${ri}" style="height:${RH}px">`;
+    h += `<td onclick="editRowLabel(${ri})" style="${td(`width:${LW}px;min-width:${LW}px;height:${RH}px;background:${C.label};font-size:11px;font-weight:700;color:${C.txt};cursor:pointer;padding:2px 5px;white-space:pre-line;line-height:1.4`)}">${row.label.replace(/\n/g,'<br>')}</td>`;
+    allDays.forEach((day, di) => {
+      const bg = isWE(day) ? C.weCell : C.cell;
+      const rl = di === refDayIdx ? `border-left:2px solid ${C.red};` : '';
+      h += `<td class="cell${isWE(day)?' we':''}" data-ri="${ri}" data-ci="${di}" id="cc${ri}_${di}" style="${td(`${rl}width:${CW}px;min-width:${CW}px;height:${RH}px;background:${bg};cursor:crosshair`)}"></td>`;
+    });
+    h += `</tr>`;
+  });
+  h += `</tbody></table>`;
+
+  document.getElementById('chart-container').innerHTML = h;
+  document.getElementById('addbtn').style.display = 'inline-block';
+  const tbl = document.getElementById('gt');
+  tbl.addEventListener('mousedown', onDown);
+  tbl.addEventListener('mousemove', onMove);
+  tbl.addEventListener('mouseup', onUp);
+  tbl.addEventListener('dragstart', e => e.preventDefault());
+  tbl.style.cursor = mode === 'move' ? 'default' : 'crosshair';
+  drawAll();
+}
+
+// ── 셀 rect (테이블 기준 상대좌표) ──
+function cRect(ri, di) {
+  const el = document.getElementById(`cc${ri}_${di}`); if (!el) return null;
+  const tbl = document.getElementById('gt');
+  const tr = tbl.getBoundingClientRect(), cr = el.getBoundingClientRect();
+  return { x: cr.left - tr.left, y: cr.top - tr.top, w: cr.width, h: cr.height };
+}
+
+// ── 화살표 path: 몸통 + 오른쪽 삼각 머리 ──
+function arwPath(w, h) {
+  const tip = Math.min(h * 0.75, w * 0.2, 22);
+  const y1 = h * 0.18, y2 = h * 0.82, bx = w - tip;
+  return {
+    p: `M0,${y1} L${bx},${y1} L${bx},0 L${w},${h/2} L${bx},${h} L${bx},${y2} L0,${y2} Z`,
+    bw: bx
+  };
+}
+
+function fitFS(lines, maxW, maxH) {
+  const cv = document.createElement('canvas'), ctx = cv.getContext('2d');
+  for (let fs = 13; fs >= 7; fs--) {
+    ctx.font = `700 ${fs}px 'Malgun Gothic',sans-serif`;
+    const lh = fs * 1.3, th = lines.length * lh;
+    const mw = Math.max(...lines.map(l => ctx.measureText(l).width));
+    if (mw <= maxW - 6 && th <= maxH - 4) return fs;
+  }
+  return 7;
+}
+
+// ── 화살표 그리기 ──
+function drawAll() {
+  document.querySelectorAll('.asvg').forEach(e => e.remove());
+  arrows.forEach((a, ai) => drawArrow(a, ai));
+  drawRefLine();
+}
+
+function drawArrow(a, ai) {
+  const tbl = document.getElementById('gt'); if (!tbl) return;
+  const s = cRect(a.ri, a.di0), e = cRect(a.ri, a.di1); if (!s || !e) return;
+  const PAD = 2, x = s.x, y = s.y + PAD, w = (e.x + e.w) - s.x, h = s.h - PAD * 2;
+  if (w < 4 || h < 4) return;
+  const { p, bw } = arwPath(w, h);
+  const lines = (a.label || '').split('\n');
+  const fs = fitFS(lines, bw, h);
+  const lh = fs * 1.3, th = lines.length * lh;
+  const moving = mDrag && mDrag.ai === ai;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('class', 'asvg'); svg.setAttribute('data-ai', ai);
+  svg.setAttribute('width', w); svg.setAttribute('height', h);
+  svg.style.cssText = `position:absolute;left:${x}px;top:${y}px;overflow:visible;pointer-events:all;z-index:${moving?20:5};cursor:${mode==='move'?'grab':'pointer'};opacity:${moving?0.5:1}`;
+
+  const defs = document.createElementNS(ns, 'defs');
+  const cl = document.createElementNS(ns, 'clipPath'); cl.setAttribute('id', `cl${ai}`);
+  const cr = document.createElementNS(ns, 'rect');
+  cr.setAttribute('x','1'); cr.setAttribute('y','0'); cr.setAttribute('width', bw - 2); cr.setAttribute('height', h);
+  cl.appendChild(cr); defs.appendChild(cl);
+
+  const pg = document.createElementNS(ns, 'path');
+  pg.setAttribute('d', p); pg.setAttribute('fill', C.arwF);
+  pg.setAttribute('stroke', C.arwF); pg.setAttribute('stroke-width', '0.5');
+
+  svg.appendChild(defs); svg.appendChild(pg);
+
+  lines.forEach((line, li) => {
+    const txt = document.createElementNS(ns, 'text');
+    txt.setAttribute('x', bw / 2);
+    txt.setAttribute('y', (h - th) / 2 + li * lh + lh * 0.82);
+    txt.setAttribute('text-anchor', 'middle');
+    txt.setAttribute('font-size', fs);
+    txt.setAttribute('fill', '#000000');
+    txt.setAttribute('font-weight', '700');
+    txt.setAttribute('font-family', "'Malgun Gothic','Apple SD Gothic Neo',sans-serif");
+    txt.setAttribute('clip-path', `url(#cl${ai})`);
+    txt.textContent = line;
+    svg.appendChild(txt);
+  });
+
+  svg.addEventListener('mousedown', ev => {
+    if (mode !== 'move') return;
+    ev.stopPropagation(); ev.preventDefault();
+    const td = hitCell(ev.clientX, ev.clientY); if (!td) return;
+    mDrag = { ai, ori: a.ri, od0: a.di0, od1: a.di1, gci: +td.dataset.ci };
+  });
+  svg.addEventListener('dblclick', ev => { ev.stopPropagation(); editArrow(ai); });
+  svg.addEventListener('contextmenu', ev => { ev.preventDefault(); ev.stopPropagation(); arrows.splice(ai, 1); drawAll(); });
+  tbl.appendChild(svg);
+}
+
+// ── 기준선 그리기 (전체 높이 빨간 선) ──
+function drawRefLine() {
+  document.querySelectorAll('.ref-line-svg').forEach(e => e.remove());
+  if (refDayIdx < 0 || !allDays.length) return;
+  // 헤더 th에서 x 위치 찾기
+  const tbl = document.getElementById('gt'); if (!tbl) return;
+  const thEl = tbl.querySelector(`th[data-ci="${refDayIdx}"]`); if (!thEl) return;
+  const tblR = tbl.getBoundingClientRect();
+  const thR = thEl.getBoundingClientRect();
+  const x = thR.left - tblR.left;
+  const totalH = tbl.offsetHeight;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('class', 'ref-line-svg');
+  svg.setAttribute('width', 3);
+  svg.setAttribute('height', totalH);
+  svg.style.cssText = `position:absolute;left:${x}px;top:0;pointer-events:none;z-index:50;overflow:visible`;
+  const line = document.createElementNS(ns, 'line');
+  line.setAttribute('x1', 1); line.setAttribute('y1', 0);
+  line.setAttribute('x2', 1); line.setAttribute('y2', totalH);
+  line.setAttribute('stroke', C.red); line.setAttribute('stroke-width', '2');
+  // 위쪽 삼각형 마커
+  const tri = document.createElementNS(ns, 'polygon');
+  tri.setAttribute('points', '-5,0 7,0 1,10');
+  tri.setAttribute('fill', C.red);
+  svg.appendChild(line); svg.appendChild(tri);
+  tbl.appendChild(svg);
+}
+
+// ── 고스트 ──
+function ghost(ri, di0, di1) {
+  document.getElementById('gsvg')?.remove();
+  const s = cRect(ri, di0), e = cRect(ri, di1); if (!s || !e) return;
+  const PAD = 2, x = s.x, y = s.y + PAD, w = (e.x + e.w) - s.x, h = s.h - PAD * 2;
+  const { p } = arwPath(w, h);
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.id = 'gsvg'; svg.setAttribute('width', w); svg.setAttribute('height', h);
+  svg.style.cssText = `position:absolute;left:${x}px;top:${y}px;overflow:visible;pointer-events:none;z-index:15;opacity:0.4`;
+  const pg = document.createElementNS(ns, 'path');
+  pg.setAttribute('d', p); pg.setAttribute('fill', C.arwF); pg.setAttribute('stroke', C.arwF); pg.setAttribute('stroke-width', '0.5');
+  svg.appendChild(pg); document.getElementById('gt').appendChild(svg);
+}
+
+function hitCell(cx, cy) {
+  const tbl = document.getElementById('gt'); if (!tbl) return null;
+  for (const td of tbl.querySelectorAll('td.cell')) {
+    const r = td.getBoundingClientRect();
+    if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) return td;
+  }
+  return null;
+}
+
+// ── 마우스 이벤트 ──
+function clrHov() { hCells.forEach(id => { const e = document.getElementById(id); if (e) e.classList.remove('sel'); }); hCells = []; }
+
+function onDown(ev) {
+  const td = ev.target.closest('td.cell'); if (!td) return;
+  ev.preventDefault();
+  if (mode === 'ref') {
+    refDayIdx = +td.dataset.ci;
+    const day = allDays[refDayIdx];
+    document.getElementById('ref-lbl').textContent = `기준선: ${day.getMonth()+1}월 ${day.getDate()}일`;
+    renderTable();
+    return;
+  }
+  if (mode === 'arrow') {
+    dDrag = { ri: +td.dataset.ri, ci: +td.dataset.ci };
+    dRow = +td.dataset.ri;
+    td.classList.add('sel'); hCells = [`cc${td.dataset.ri}_${td.dataset.ci}`];
+  }
+}
+
+function onMove(ev) {
+  if (mode === 'arrow' && dDrag) {
+    const td = ev.target.closest('td.cell');
+    if (!td || +td.dataset.ri !== dRow) return;
+    clrHov();
+    const ci0 = Math.min(dDrag.ci, +td.dataset.ci), ci1 = Math.max(dDrag.ci, +td.dataset.ci);
+    for (let i = ci0; i <= ci1; i++) {
+      const el = document.getElementById(`cc${dRow}_${i}`);
+      if (el) { el.classList.add('sel'); hCells.push(`cc${dRow}_${i}`); }
+    }
+  }
+  if (mode === 'move' && mDrag) mvMove(ev);
+}
+
+function onUp(ev) {
+  if (mode === 'arrow' && dDrag) {
+    const td = ev.target.closest('td.cell');
+    let ci1 = dDrag.ci; if (td && +td.dataset.ri === dRow) ci1 = +td.dataset.ci;
+    clrHov();
+    const ci0 = Math.min(dDrag.ci, ci1), ci2 = Math.max(dDrag.ci, ci1);
+    dDrag = null;
+    showModal('화살표 텍스트 입력', '', lbl => {
+      arrows.push({ ri: dRow, di0: ci0, di1: ci2, label: lbl || '' });
+      drawAll();
+    });
+    return;
+  }
+  if (mode === 'move' && mDrag) mvUp();
+}
+
+function mvMove(ev) {
+  const td = hitCell(ev.clientX, ev.clientY); if (!td) return;
+  const curCi = +td.dataset.ci, curRi = +td.dataset.ri;
+  const span = mDrag.od1 - mDrag.od0;
+  const off = curCi - mDrag.gci;
+  let nd0 = Math.max(0, Math.min(allDays.length - 1, mDrag.od0 + off));
+  let nd1 = Math.max(0, Math.min(allDays.length - 1, nd0 + span));
+  const nr = Math.max(0, Math.min(rows.length - 1, curRi));
+  ghost(nr, nd0, nd1);
+  mDrag._r = nr; mDrag._d0 = nd0; mDrag._d1 = nd1;
+}
+
+function mvUp() {
+  document.getElementById('gsvg')?.remove();
+  if (mDrag._r != null) {
+    arrows[mDrag.ai].ri = mDrag._r;
+    arrows[mDrag.ai].di0 = mDrag._d0;
+    arrows[mDrag.ai].di1 = mDrag._d1;
+  }
+  mDrag = null; drawAll();
+}
+
+window.addEventListener('mouseup', () => {
+  if (mode === 'move' && mDrag) mvUp();
+  if (mode === 'arrow' && dDrag) { clrHov(); dDrag = null; }
+});
+window.addEventListener('mousemove', ev => { if (mode === 'move' && mDrag) mvMove(ev); });
+
+// ── 편집 ──
+function editArrow(ai) {
+  showModal('텍스트 수정', arrows[ai].label || '', v => { arrows[ai].label = v; drawAll(); });
+}
+function editRowLabel(ri) {
+  if (ri < 0) return;
+  showModal('행 이름 수정', rows[ri].label, v => { if (v !== null) rows[ri].label = v; renderTable(); });
+}
+function addRow() { rows.push({ label: '새 항목' }); renderTable(); }
+function undoLast() { if (!arrows.length) return; arrows.pop(); drawAll(); }
+
+function showModal(title, def, cb) {
+  pModal = cb;
+  document.getElementById('mt').textContent = title;
+  const inp = document.getElementById('mi'); inp.value = def || '';
+  document.getElementById('modal').style.display = 'block';
+  setTimeout(() => { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }, 50);
+  inp.onkeydown = e => { if (e.key === 'Enter' && e.ctrlKey) closeModal(1); if (e.key === 'Escape') closeModal(0); };
+}
+function closeModal(ok) {
+  document.getElementById('modal').style.display = 'none';
+  if (ok && pModal) pModal(document.getElementById('mi').value);
+  pModal = null;
+}
+
+// ── PPT 내보내기 ──
+const EMU = 9144;
+function px(v) { return Math.round(v * EMU); }
+function hx(s) { return s.replace('#', '').toUpperCase(); }
+
+function makeTc(txt, bg, bold, fs, cs, rs, refL, isVM) {
+  if (isVM) {
+    return `<a:tc vMerge="1"><a:txBody><a:bodyPr/><a:lstStyle/><a:p/></a:txBody><a:tcPr><a:lnL w="6350"><a:solidFill><a:srgbClr val="${hx(C.bd)}"/></a:solidFill></a:lnL><a:lnR w="6350"><a:solidFill><a:srgbClr val="${hx(C.bd)}"/></a:solidFill></a:lnR><a:lnT w="6350"><a:solidFill><a:srgbClr val="${hx(C.bd)}"/></a:solidFill></a:lnT><a:lnB w="6350"><a:solidFill><a:srgbClr val="${hx(C.bd)}"/></a:solidFill></a:lnB><a:solidFill><a:srgbClr val="${hx(bg)}"/></a:solidFill></a:tcPr></a:tc>`;
+  }
+  const lw = refL ? '19050' : '6350', lc = refL ? hx(C.red) : hx(C.bd);
+  const bdr = `<a:lnL w="${lw}"><a:solidFill><a:srgbClr val="${lc}"/></a:solidFill></a:lnL><a:lnR w="6350"><a:solidFill><a:srgbClr val="${hx(C.bd)}"/></a:solidFill></a:lnR><a:lnT w="6350"><a:solidFill><a:srgbClr val="${hx(C.bd)}"/></a:solidFill></a:lnT><a:lnB w="6350"><a:solidFill><a:srgbClr val="${hx(C.bd)}"/></a:solidFill></a:lnB>`;
+  const sa = cs > 1 ? ` gridSpan="${cs}"` : '';
+  const ra = rs > 1 ? ` rowSpan="${rs}"` : '';
+  const safe = String(txt || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,' ');
+  const body = txt ? `<a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="ko-KR" sz="${Math.round((fs||9)*100)}"${bold?' b="1"':''}><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:rPr><a:t>${safe}</a:t></a:r></a:p>` : `<a:p><a:endParaRPr lang="ko-KR" sz="900"/></a:p>`;
+  return `<a:tc><a:txBody><a:bodyPr anchor="ctr"/><a:lstStyle/>${body}</a:txBody><a:tcPr${sa}${ra}>${bdr}<a:solidFill><a:srgbClr val="${hx(bg)}"/></a:solidFill></a:tcPr></a:tc>`;
+}
+
+async function exportPPT() {
+  if (!built) { alert('먼저 차트를 생성하세요'); return; }
+  const LW = 80, MH = 28, DH = 22;
+  const colWs = [px(LW), ...allDays.map(() => px(CW))];
+  const rowHs = [px(MH), px(DH), ...rows.map(() => px(RH))];
+  const TW = colWs.reduce((a, b) => a + b, 0);
+  const TH = rowHs.reduce((a, b) => a + b, 0);
+  const SW = 12192000, SH = 6858000;
+  const TX = Math.round((SW - TW) / 2), TY = Math.round((SH - TH) / 2);
+  const ms = monthSpans();
+
+  let tblXml = '';
+
+  // 월 헤더
+  tblXml += `<a:tr h="${px(MH)}">`;
+  tblXml += makeTc('구분', C.hdrMonth, true, 10, 1, 2, false, false);
+  ms.forEach(m => tblXml += makeTc(m.lbl, C.hdrMonth, true, 10, m.cnt, 1, false, false));
+  tblXml += `</a:tr>`;
+
+  // 일 헤더
+  tblXml += `<a:tr h="${px(DH)}">`;
+  tblXml += makeTc('', C.hdrMonth, false, 8, 1, 1, false, true);
+  allDays.forEach((day, di) => {
+    const bg = isWE(day) ? C.weHdr : C.hdrDay;
+    tblXml += makeTc(String(day.getDate()).padStart(2,'0'), bg, true, 8, 1, 1, di === refDayIdx, false);
+  });
+  tblXml += `</a:tr>`;
+
+  // 데이터 행
+  rows.forEach((row, ri) => {
+    tblXml += `<a:tr h="${px(RH)}">`;
+    tblXml += makeTc(row.label, C.label, true, 9, 1, 1, false, false);
+    allDays.forEach((day, di) => {
+      const bg = isWE(day) ? C.weCell : C.cell;
+      tblXml += makeTc('', bg, false, 8, 1, 1, di === refDayIdx, false);
+    });
+    tblXml += `</a:tr>`;
+  });
+
+  const colXml = colWs.map(w => `<a:gridCol w="${w}"/>`).join('');
+
+  // 화살표 도형
+  let shapes = '';
+  const hdrH = px(MH + DH);
+  arrows.forEach((a, ai) => {
+    let ax = TX + px(LW) + a.di0 * px(CW);
+    let aw = (a.di1 - a.di0 + 1) * px(CW);
+    let ay = TY + hdrH + a.ri * px(RH) + px(2);
+    const ah = px(RH - 4);
+    const t = (a.label || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,' ');
+    shapes += `<p:sp><p:nvSpPr><p:cNvPr id="${200+ai}" name="A${ai}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${ax}" y="${ay}"/><a:ext cx="${aw}" cy="${ah}"/></a:xfrm><a:prstGeom prst="homePlate"><a:avLst><a:gd name="adj" fmla="val 50000"/></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val="${hx(C.arwF)}"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr anchor="ctr"/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="ko-KR" sz="900" b="1"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:rPr><a:t>${t}</a:t></a:r></a:p></p:txBody></p:sp>`;
+  });
+
+  // 기준선
+  if (refDayIdx >= 0) {
+    const lx = TX + px(LW) + refDayIdx * px(CW);
+    shapes += `<p:sp><p:nvSpPr><p:cNvPr id="300" name="Ref"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${lx}" y="${TY}"/><a:ext cx="19050" cy="${TH}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="${hx(C.red)}"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>`;
+  }
+
+  const slideXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="100" name="Table"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="${TX}" y="${TY}"/><a:ext cx="${TW}" cy="${TH}"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr bandRow="0"/><a:tblGrid>${colXml}</a:tblGrid>${tblXml}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>${shapes}</p:spTree></p:cSld></p:sld>`;
+  const presXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" saveSubsetFonts="1"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst><p:sldSz cx="${SW}" cy="${SH}"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`;
+  const presRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>`;
+  const slideRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>`;
+  const slXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" type="blank" preserve="1"><p:cSld name="Blank"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>`;
+  const slRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/></Relationships>`;
+  const smXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst><p:txStyles><p:titleStyle><a:lvl1pPr><a:defRPr/></a:lvl1pPr></p:titleStyle><p:bodyStyle><a:lvl1pPr><a:defRPr/></a:lvl1pPr></p:bodyStyle><p:otherStyle><a:lvl1pPr><a:defRPr/></a:lvl1pPr></p:otherStyle></p:txStyles></p:sldMaster>`;
+  const smRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>`;
+  const ct = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/></Types>`;
+  const rr = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>`;
+
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', ct); zip.file('_rels/.rels', rr);
+  zip.file('ppt/presentation.xml', presXml); zip.file('ppt/_rels/presentation.xml.rels', presRels);
+  zip.file('ppt/slides/slide1.xml', slideXml); zip.file('ppt/slides/_rels/slide1.xml.rels', slideRels);
+  zip.file('ppt/slideLayouts/slideLayout1.xml', slXml); zip.file('ppt/slideLayouts/_rels/slideLayout1.xml.rels', slRels);
+  zip.file('ppt/slideMasters/slideMaster1.xml', smXml); zip.file('ppt/slideMasters/_rels/slideMaster1.xml.rels', smRels);
+
+  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'gantt_chart.pptx'; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
+// 초기 차트 자동 생성
+buildChart();
+</script>
+</body>
+</html>
